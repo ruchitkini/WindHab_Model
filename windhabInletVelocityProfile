@@ -1,0 +1,107 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  7
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volVectorField;
+    location    "0";
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField uniform (0 0 0); 
+
+boundaryField
+{
+    walls
+    {
+        type            noSlip;
+    }
+    inlet
+	{
+        type            codedFixedValue;
+        value           uniform (0 0 0);
+        redirectType    WindhabProfil;
+
+        code
+        #{
+	// set material properties accordingly to flushing chocolate
+	// chocolate	tau0	tau1	eta_inf		gd	rho
+	// weissB	11.26	18.56	1.94		12.13	1200
+	// dunkelE	21.83	42.1	3.26		10.24	1260
+	// weissC	8.2	12.44	1.13		11.83	1200
+	const scalar tau0=21.4; // all dark chocolate at 40 °C
+	const scalar tau1=41.6;
+	const scalar eta=2.8;
+	const scalar gd=7.8;
+
+	// set f=dp/L according to results from u_b.py for given u_b 
+	const scalar f=21354.03951009115; // u_b = 0.1 m/s
+	
+	//chocolate:	weissB		dunkelE 	weissC
+	//ub
+	//0.1		12707		23438		7738
+	//0.2		22098		39338		13206
+	//0.3		31329		54871		18582
+	// stuff needed by OpenFOAM
+	const fvPatch& boundaryPatch = patch();
+        const vectorField& Cf = boundaryPatch.Cf();
+        vectorField& field =*this;
+	
+	// location and Radius of the inlet
+	const scalar R=0.013;
+
+	// values derived from material properties;
+	const scalar a=(tau1-tau0)/eta;
+	const scalar c=-f/(2*eta);
+	const scalar d=tau1/eta;
+	const scalar r0=2*tau0/f;
+
+	//value for lambertw(r0,..) and lambertw(R,...)
+	scalar wr0=0;
+	scalar wR=0;
+	for (int n=0; n<20; n++)
+	{
+		wr0=wr0-(wr0*exp(wr0)-a/gd*exp((d+c*r0)/gd))/(exp(wr0)+wr0*exp(wr0));
+		wR=wR-(wR*exp(wR)-a/gd*exp((d+c*R)/gd))/(exp(wR)+wR*exp(wR));
+	}
+        forAll(Cf,faceI)
+        {
+                const scalar x=Cf[faceI].z();
+                const scalar y=Cf[faceI].y();
+                const scalar r=pow(x*x+y*y,0.5);
+                if(r>r0)
+                {
+			scalar wr=0;
+			for (int n=0; n<20; n++)
+        		{
+                		wr=wr-(wr*exp(wr)-a/gd*exp((d+c*r)/gd))/(exp(wr)+wr*exp(wr));
+        		}
+                        field[faceI]=vector(0,0,d*(r-R)+c/2*(pow(r,2)-pow(R,2))-gd*gd/c*(wr-wR)-gd*gd/(2*c)*(pow(wr,2)-pow(wR,2)));
+                }
+                else
+                {
+			field[faceI]=vector(0,0,d*(r0-R)+c/2*(pow(r0,2)-pow(R,2))-gd*gd/c*(wr0-wR)-gd*gd/(2*c)*(pow(wr0,2)-pow(wR,2)));
+                }
+        }
+
+        #};
+    }
+
+    outlet
+    {
+        type            zeroGradient;
+    }
+
+}
+
+
+// ************************************************************************* //
